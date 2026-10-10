@@ -77,3 +77,88 @@ No Critical defects: nothing in this paper-only, design-stage report can place a
 | D13 | Fixed. Report committed and pushed. | git |
 | D14 | Accepted. Pages of ≤ 300 with continuity checks. | §5 |
 
+
+## Milestone 1 — Re-review by Agent B (revision 2)
+
+Date: 2026-10-10. Target: `docs/milestone-01-discovery.md` revision 2, commit `819d188` on `claude/friendly-meitner-l6zm6z`. The report was not edited by Agent B. Each fix was checked against the report text itself, not against the developer's response table.
+
+### Checks executed
+
+| # | Check | Result |
+|---|---|---|
+| R1 | Full read of revision 2 and the developer response table | Done. Every response was checked against the cited section. |
+| R2 | `git status -sb`, `git branch -vv`, `git ls-remote origin` | HEAD `819d188` equals `origin/claude/friendly-meitner-l6zm6z`, so the work is pushed. **D13 confirmed fixed.** |
+| R3 | `grep -n -i "latch\|resume\|pause\|clears\|candle_close_ts\|£1\|2.50"` over the report | The daily-loss latch **clear rule from revision 1 ("clears at 00:00 UTC") is gone, and nothing replaces it**. A plain `resume` control exists alongside `review-resume`. `£1` (§2.1) and `£2.50` (§3) are both used as the minimum-order pass threshold. `candle_close_ts` is still the entry key while §4.2 switches to bucket-open timestamps. |
+| R4 | Arithmetic in Python | 5 y × 8,766 h = 43,830 hourly candles (matches "~44k"). 30% of 60 months = 18 months OOS (matches). The §2.3 figures (302 trades; 102 rounds / ~306 trades) were checked in round 1 (C7) and match. At 1% risk: a 10% stop gives a £5.00 position, a 20% stop gives £2.50. A £5 position stopped at −10% exits at **£4.50**; a £2.50 position stopped at −20% exits at **£2.00**. At the criterion-1 minimum rate (50 trades / 18 months ≈ 2.8 per month), a 90-day forward test expects **≈ 8 trades**. Reaching 20 trades in 90 days needs ≥ ~122 OOS trades. |
+| R5 | Cross-section consistency: §2.1 ↔ §3 ↔ §4.1 ↔ §4.2 ↔ §5 ↔ §6 ↔ §9 | Findings N1–N9 below. |
+
+No new web searches were run. The round-1 searches (S1–S4) still cover the factual claims, and revision 2 adds no new external facts except the DexScreener rate limits, which are labelled third-party [DOCS-SEARCH]. Network checks were not repeated: C5 still applies, and the report now lists api.jup.ag and api.rugcheck.xyz as blocked.
+
+### Status of round-1 defects
+
+| ID | Status | Notes (verified in text) |
+|---|---|---|
+| D1 | **Fixed** | §2.1 names the £5 GBP minimum as the binding constraint, covers the sub-cap sizing case, drops the BTC-price premise, and adds a blocking Milestone 2 check (§9 row 2). There is a residual threshold inconsistency, tracked as N3. |
+| D2 | **Fixed** | §3 is "provisional", the reasons are re-weighted, the sandbox is excluded, and switch criteria are pre-defined. N3 covers how the criteria interact. |
+| D3 | **Fixed** | §2.3 now reads ~302 trades and ~102 rounds / ~306 trades, matching R4. |
+| D4 | **Partially fixed** | (a)–(e) fixed: httpx2, [PLATFORM-DOCS] label, Coinbase UK [UNVERIFIED], status line, repo case. (f) is not fixed: §2 still says the Kraken base row was "not seen on the official page", but the round-1 search S2 reported the CA help-centre table lists 0.40/0.80. The wording should say "reported on the CA help page via search; not opened directly". Low. |
+| D5 | **Partially fixed** | The reduce-only exemption and the stale-data stop rule are added. However, exits can still be **blocked by the exchange-minimum rule** (N1) and by the **idempotency key on retries** (N2), so the guarantee that an exit is always possible is not met. |
+| D6 | **Fixed** | Kill switch (HALT/FLATTEN, persisted, cleared by logged command), recovery-trading rules, no-short and no-leverage invariants with a DB CHECK, localhost dashboard with token and audit table are all present. The resume semantics gap is N4. |
+| D7 | **Partially fixed** | Equity, daily loss, Europe/London boundary, peak drawdown and hard ceilings are all defined. Two new contradictions were introduced: the drawdown resume is self-defeating (N5), and the daily-latch clear rule is missing (N4). |
+| D8 | **Partially fixed** | Per-origin IDs, order state machine, per-fill ledger rows and restart candle replay are added. The retry problem (N2) and the replay fill-rule inconsistency (N6) remain. |
+| D9 | **Fixed** | Bucket-open convention, drop of the unfinished candle, look-ahead test, quantified spread, worst-case same-candle rule and gap rule are all present. Minor wording issues are N8. |
+| D10 | **Partially fixed** | Bootstrap specified, PF ≥ 1.0 floor, exposure-scaled benchmark, ≥ 50 trades, ≥ 18-month OOS, ≤ 7% DD, ≤ 5 configurations per family. The trade-count criteria now conflict (N7), and edge cases remain (N9). |
+| D11 | **Fixed (values deferred, accepted)** | Rows for spreads, liquidity proxy, rate limits and exchange risks, plus a Phase 2 comparison (§2.4), are added. Deferring the numbers to Milestone 2 is justified by the blocked hosts (C5) and is tracked in §9. |
+| D12 | **Fixed** | Missing packages listed in §1.1 and §7. |
+| D13 | **Fixed** | R2. |
+| D14 | **Fixed** | §5 pages at ≤ 300 with continuity checks. |
+
+### New defects (introduced or exposed by revision 2)
+
+| ID | Severity | Finding | Evidence | Required fix |
+|---|---|---|---|---|
+| N1 | **High** | **Exits can fall below the exchange minimum and become impossible to execute.** §4.1 says reduce-only exits are "always allowed", but §2.1 and §4.2 say every order below the exchange minimum is **rejected**, with no exemption for exits. A full-size £5 position stopped at −10% must sell £4.50, which is below Kraken's £5 minimum. A £2.50 position (20% stop) stopped out sells £2.00, which is below the §3 Coinbase pass threshold of £2.50 if the minimum is near that. The simulator would then reject the protective exit and the position stays open with no stop. The §3 switch criteria test entries only. | §2.1 last bullet; §4.1 "Reduce-only exits are always allowed"; §4.2 "Orders that break exchange minimums … are rejected"; §3 switch criteria; R4 | Add an entry-time rule: an entry is allowed only if the position's value **at a stressed exit price** (stop − gap buffer, e.g. 2× stop distance), after exit fees, is ≥ the venue's minimum sell size/notional **with margin**. Apply the §3 minimum check to the sell side (Coinbase `base_min_size` for sells). Define the behaviour for an unsellable residual ("dust"): flag it, mark it to £0 for risk metrics, alert, and never treat it as an exited position. Add a scenario test. |
+| N2 | **Medium** | **A failed exit can't be retried.** Stop and target exits are keyed `(position_id, exit_reason)` with a UNIQUE constraint ("a replay is a no-op"). If that exit order ends `REJECTED`, `EXPIRED` or `CANCELLED` (minimum, stale data, partial fill then cancel), any retry has the same key and is silently dropped, leaving the position unprotected. | §4.1 Idempotency bullets; state list includes REJECTED/EXPIRED/CANCELLED | Add an `attempt` counter to exit keys, so the key is `(position_id, exit_reason, attempt)`. Dedupe only while a prior attempt is non-terminal. Require that a position with a terminal-failed exit raises an alert and is retried each cycle. Test: reject the first stop exit; the second attempt must be submitted. |
+| N3 | **Medium** | **Inconsistent minimum-order thresholds.** §2.1 sets the blocking-check target as "≤ £1 minimum order value". §3 fails a pair only at "≥ £2.50". A venue with a £2 minimum passes §3 but misses the §2.1 target, so the Milestone 2 outcome is ambiguous. Also, under §3 Kraken can never pass (£5 ≥ £2.50), so the "switch to Kraken if cheaper" branch is dead, and nothing says what happens if only one of BTC-GBP / ETH-GBP passes. | §2.1 bullet 4 vs §3 bullet 1 (R3) | Use one pre-registered threshold, derived from N1: the minimum must allow both entry and stressed exit for the smallest permitted position. Say explicitly that Kraken GBP is excluded unless its minimums are found lower. Define single-pair-pass behaviour (trade the passing pair only). |
+| N4 | **Medium** | **Daily-loss latch has no clear rule, and "resume" is undefined.** Revision 1's "daily-loss latch clears at 00:00 UTC" was removed and not replaced: §4.1 defines the boundary snapshot but not latch clearing. The dashboard has a token-protected `resume` command distinct from `review-resume`, and nothing says whether `resume` can clear the daily-loss latch or the kill switch early. That would be a manual bypass of a mandated limit. | R3 grep: no "clears" for the daily latch; §4.1 Dashboard controls list "pause, resume" | State: "the daily-loss latch clears automatically only at the next Europe/London 00:00 boundary and cannot be cleared manually". Define `pause`/`resume` as operator pause only, unable to clear any latch or kill switch. Add a test that `resume` during an active daily latch leaves entries blocked. |
+| N5 | **Medium** | **The drawdown resume contradicts itself.** The drawdown latch trips at ≥ 10% below peak, and "peak is not reset on resume". At the moment of `review-resume`, current equity is still ≥ 10% below the unchanged peak, so the condition is still true and the latch re-trips at the next evaluation. Either resume is a no-op (a permanent stop the doc doesn't admit to) or the trip condition is not re-evaluated after resume (an unbounded drawdown after the first resume). Neither is stated. | §4.1 Drawdown bullet | Choose and state one rule. Example: the 10% drawdown stop is **terminal for that paper account**, so resume needs a new paper account or epoch, with the old record kept. Or: on resume, a new reference is recorded with a stricter remaining budget, while cumulative drawdown from the original peak is still shown and capped (e.g. total ≤ 15% ends the account). Test whichever is chosen. |
+| N6 | **Medium** | **Restart replay uses a different fill rule from the backtest and live paper fills.** Restart replay fills at "the worse of the stop level and the first candle **open after** it was crossed", which is up to a full interval later. §4.2 backtests fill gaps at the open but say nothing about the non-gap intrabar fill, and live paper stops fill "on the next observed price". The report claims the "same fill and risk code" is used, but three different stop-fill rules appear. | §4.1 start-up step 4; §4.2 Stops, Gaps bullets | Define one stop-fill function used by backtest, live paper and restart replay. Example: for a long stop, a gap fills at the open; otherwise it fills at min(stop, candle close) − slippage. Or adopt the harsher restart rule everywhere. State the non-gap intrabar fill explicitly. |
+| N7 | **Medium** | **The trade-count criteria conflict.** Criterion 1 needs ≥ 50 OOS trades in ≥ 18 months (≈ 2.8 per month). Criterion 7 needs ≥ 20 forward trades in 90 days (≈ 6.7 per month). A strategy at the criterion-1 minimum rate expects ≈ 8 forward trades in 90 days, so it fails criterion 7 by construction unless it trades ≥ ~122 times OOS. This silently excludes the daily-timeframe strategies listed in §4.3 (e.g. donchian_breakout on 1d) and pushes the selection toward high-frequency strategies, where costs hurt most at £5 sizes. | §6 criteria 1 and 7; R4 | Restate criterion 7 as "forward test runs **≥ 90 days and until ≥ 20 trades** (cap e.g. 12 months; failing to reach 20 trades by the cap = fail)". Or scale the forward trade minimum to the strategy's OOS trade rate. Make this decision before any data is seen. |
+| N8 | **Low** | Wording and consistency: (a) the entry key uses `candle_close_ts` while §4.2 normalises timestamps to bucket open, so a mis-implementation could key on the open and collide with or miss signals; (b) "half-spread on each side equal to the 90th-percentile spread" can be read as charging the full spread per side; (c) "compile-time constants" has no meaning in Python (use module-level constants plus a start-up assertion); (d) §2.2 "maker entries roughly halve the fee" holds for Kraken (0.40 vs 0.80) but not Coinbase (0.40 vs 0.60); (e) D4(f) wording. | §4.1, §4.2, §2.2, §2 | Name one timestamp field everywhere, e.g. `bucket_open_ts` plus a derived close. Write the spread charge as an explicit formula: cost per side = spread_p90 / 2, or state a full-spread-per-side choice deliberately. Fix the remaining wording. |
+| N9 | **Low** | Evidence-threshold edge cases. (a) Dropping zero-loss resamples in the criterion-7 bootstrap removes the top tail and biases the 5th percentile slightly downward (more lenient). (b) Forward PF is undefined if the forward test has no losing trade, and no pass/fail rule is given. (c) Criterion 2's rationale "too few trades to judge" for zero losses contradicts the ≥ 50-trade requirement. (d) P2: no rule for an OOS window that lacks a 20% fall; adjusting the window after seeing data would break pre-registration. (e) The 10% single-position cap is checked at entry only: nothing says what happens when a winning position grows above 10% of equity. | §6 P2, criteria 2 and 7; §4.1 | (a) Use a capped PF (e.g. cap at 10) or bootstrap expectancy instead. (b) Define it (e.g. zero forward losses with ≥ 20 trades counts as PF ≥ 1.0 and passes the floor). (c) Fix the wording. (d) Pre-register: "if the 30% OOS window lacks a ≥ 20% fall, extend history backwards; the split proportions are not changed". (e) State whether the cap applies at entry only or is enforced by trimming. |
+
+Severity rationale: N1 is High because it reopens the core of D5. Under the specified rules, a protective exit on a normally sized position can be rejected and the position left open. That is a safety defect in the risk design, not a wording issue. Nothing here is Critical, because no live path exists.
+
+### Verdict (revision 2)
+
+**PASS WITH CONDITIONS.** Revision 2 is a substantial, honest improvement. D1–D3, D6, D9 and D11–D14 are genuinely fixed in the text, and none of the round-1 High defects remains open in its original form. One new High defect (N1) and several medium-severity rule conflicts (N2–N7) were introduced or exposed by the new design rules. They are design-text fixes, needed before any code relies on them.
+
+Conditions, which are binding and must be met before Milestone 3 code that implements §4.1/§4.2/§6 is merged:
+
+1. **N1** fixed in the report: entry-time exit-feasibility check against the minimum, sell-side minimum check in Milestone 2, defined dust handling. This is required **before Milestone 2 closes**, because it changes the §2.1/§3 pass threshold.
+2. **N2, N4, N5, N6** fixed in §4.1/§4.2 text, each with a named scenario test added to the Milestone 4/5 test plan.
+3. **N3 and N7** resolved with a single pre-registered rule, written into the report **before any backtest or Milestone 2 measurement is run**. Otherwise the pre-registration claim of §6 is void.
+4. **D4(f), N8, N9** may be fixed now or carried as tracked Low items. Each must be acknowledged in the developer responses.
+
+Agent B will verify conditions 1–3 in the Milestone 2 review. If they are not addressed by then, this verdict becomes **FAIL**.
+
+### Developer responses (revision 2)
+
+_Pending developer fixes._
+
+### Developer responses (revision 3)
+
+| ID | Response | Where |
+|---|---|---|
+| N1 | Fixed. There is now one venue-minimum rule, applied at entry: worst-case exit value = qty × stop × 0.75 must be ≥ the minimum, so a pair needs a minimum ≤ £1.00. Unsellable remainders are marked `DUST` and valued at £0. Scenario test planned: *stop-out on a minimum-size position still produces an accepted exit*. | §2.1 |
+| N2 | Fixed. Exit IDs carry `attempt`, which increases only after REJECTED or EXPIRED, and a partial unique index allows one active exit per position. Test: *rejected exit is retried exactly once and never double-sells*. | §4.1 |
+| N3 | Fixed. The ≤ £1.00 threshold is used everywhere. Kraken GBP is explicitly recorded as failing on current documentation, so the switch branch is no longer contradictory. | §2.1, §3 |
+| N4 | Fixed. The daily latch clears only automatically at 00:00 Europe/London. `pause`/`resume` can't clear any latch or the kill switch, and the kill switch clears only through `kill-clear`. Test: *resume during an active daily latch leaves entries blocked*. | §4.1 |
+| N5 | Fixed. `review-resume` re-baselines the reference peak. The all-time peak and drawdown are never reset, and an all-time drawdown of 20% refuses resume. Test: *after review-resume the latch doesn't re-trip immediately, and still trips after a further 10% fall*. | §4.1 |
+| N6 | Fixed. A single `stop_fill` function is used for live paper, backtest and replay. Test: *the same price path gives an identical stop fill in all three paths*. | §4.1, §4.2 |
+| N7 | Fixed. Forward test needs ≥ 90 days and ≥ 15 trades, extended up to 365 days, so it's consistent with ≥ 50 OOS trades over ≥ 18 months. | §6 |
+| N8 | Fixed. Entry key uses `signal_candle_open_ts`, the spread formula is explicit, "compile-time" is replaced by hard-coded ceilings plus a test, and the maker-fee wording is corrected. | §2.2, §4 |
+| N9 | Fixed. The bootstrap fails if > 5% of resamples are dropped. An OOS window without a 20% fall means "insufficient evidence" and the window is never moved. Position growth above 12.5% is trimmed. | §4.1, §6 |
+| D4 residual | Fixed. Kraken fee source wording now matches what was seen. | §2 |
+
+All four conditions are addressed in the design text. The named scenario tests will be implemented and run in Milestones 3–5. They have not been run yet, because there is no code.

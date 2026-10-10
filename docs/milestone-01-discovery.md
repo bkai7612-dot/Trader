@@ -3,7 +3,7 @@
 **Project:** PAIDROCKET, autonomous crypto paper-trading system
 **Date:** 2026-10-10
 **Mode:** PAPER only. Nothing here places, signs or funds any real order.
-**Status:** Revision 2. Revision 1 was reviewed by Agent B (FAIL with conditions: 14 defects). This revision answers each defect; see `docs/review-log.md`. It is awaiting re-review.
+**Status:** Revision 3. Revision 1 failed review with 14 defects. Revision 2 passed with conditions and 9 new findings (N1–N9). Revision 3 resolves N1–N9. Full trail in `docs/review-log.md`.
 
 Every claim below is labelled with how it was established:
 
@@ -76,7 +76,7 @@ All figures are [DOCS-SEARCH] unless marked otherwise. Fee schedules changed in 
 | Real-time data | REST plus WebSocket | REST plus WebSocket v2 | n/a |
 | Sandbox | Static mock sandbox (`api-sandbox.coinbase.com`), accounts and orders only. **No value for paper Phase 1.** Marginal value at the live stage. | No spot sandbox found | n/a |
 | API key permissions | CDP API keys (JWT-signed), scoped view / trade / transfer. A trade-only key is possible. | Granular key permissions. Withdraw can be left off. | n/a |
-| Entry-tier fees (maker / taker) | ~0.40% / 0.60% (sources disagree, Sept 2026 change not verified) | 0.40% / 0.80% after 9 July 2026 (multiple reviews agree; base row not seen on the official page) | n/a |
+| Entry-tier fees (maker / taker) | ~0.40% / 0.60% (sources disagree, Sept 2026 change not verified) | 0.40% / 0.80% after 9 July 2026 (multiple reviews agree, and one search summary attributes it to Kraken's own schedule as of 18 July 2026. I have not read the official page directly.) | n/a |
 | Minimum order | `base_min_size` / `quote_min_size` per product. **Value for BTC-GBP unknown.** | BTC 0.0001, ETH 0.01, **GBP 5** (support article, Feb 2026) | n/a |
 | Spreads (GBP books) | **Not measured.** No reliable source found. Measured in Milestone 2 (median and 90th percentile over ≥ 7 days). | **Not measured.** Same plan. | n/a |
 | Liquidity | GBP books expected to be thinner than USD/USDC [UNVERIFIED]. Proxy to collect: reported 24h GBP volume and top-of-book depth. | Same [UNVERIFIED] | n/a |
@@ -91,12 +91,18 @@ This is arithmetic only.
 - **Maximum single-position exposure = 10% of equity = £5.00 at £50.**
 - **The binding constraint is the GBP order-value minimum, not the BTC quantity minimum.** Kraken's GBP minimum is £5 (support article). At exactly £50 equity, the cap equals the minimum. Once equity falls below £50, **or** whenever the 1%-risk sizing gives a position below the cap (any stop wider than 10%), **every Kraken GBP order is below the minimum and must be rejected, whatever BTC's price.** In practice, a £50 Kraken account could stop trading after its first loss.
 - The 0.0001 BTC quantity minimum adds a second constraint whenever BTC/GBP > £50,000. I could not verify the current price. Agent B's search pointed to around £48k, which I also can't verify. Either way, the GBP minimum alone is enough to make Kraken unworkable at this capital.
-- **Coinbase could have the same problem.** If its BTC-GBP `quote_min_size` is near £5, Coinbase is unworkable too. **Milestone 2 has a blocking check:** fetch the live minimums. If no candidate exchange allows orders well below the cap (target ≤ £1 minimum order value), report to the user that the mandated risk limits and £50 capital are incompatible on that venue, rather than loosening the limits.
-- The risk engine rejects any order below the exchange minimum. The simulator applies the same minimums.
+- **Coinbase could have the same problem.** If its BTC-GBP minimum is near £5, Coinbase is unworkable too.
+- **Exits must stay sellable (the single venue-minimum rule).** An exit has to meet the venue minimum too. A protective stop must never be rejected for being too small, so the rule is applied **at entry**:
+  - An entry is allowed only if its **worst-case exit value** is at least the venue's minimum order value (and the quantity is at least the base minimum).
+  - Worst-case exit value = qty × stop price × (1 − 25% gap allowance).
+  - With the £5 cap and a 10% stop, the worst case is about £3.37. **A pair is usable only if its minimum order value is ≤ £1.00.** That leaves room for equity to fall about 30% before entries become impossible.
+  - **This one threshold is used everywhere: §2.1, §3 and the Milestone 2 blocking check.**
+- **Milestone 2 blocking check:** fetch the live minimums. If no venue and pair has a minimum ≤ £1.00, report to the user that the mandated limits and £50 capital are incompatible there. The limits are not loosened.
+- **Unsellable remainder:** if a position still ends up below the minimum (for example after a partial fill), it is marked `DUST`, valued at **£0** in equity, shown on the dashboard, and left out of exposure calculations. No new entry is allowed on that symbol until the dust is resolved.
 
 ### 2.2 Cost drag
 
-- **Fees:** a round trip at taker rates costs ~1.2% (Coinbase 0.60%) to ~1.6% (Kraken 0.80%), plus spread and slippage. Maker entries roughly halve the fee, but some orders won't fill.
+- **Fees:** a round trip at taker rates costs ~1.2% (Coinbase 0.60%) to ~1.6% (Kraken 0.80%), plus spread and slippage. Maker orders cost a third less on Coinbase (0.40% vs 0.60%) and half on Kraken (0.40% vs 0.80%), but some won't fill.
 - **Spreads** are unmeasured. At £5 position sizes they may cost as much as the fees. Milestone 2 measures them.
 - Network fees apply only to Phase 2 Solana swaps.
 
@@ -131,8 +137,8 @@ The sandbox is **not** counted as a reason: it is a static mock and adds nothing
 
 **Switch criteria, defined now and checked in Milestone 2 using live public data:**
 
-- If Coinbase's BTC-GBP or ETH-GBP minimum order value is ≥ £2.50 (half the cap), it fails for that pair.
-- Compare the **all-in round-trip cost** (2 × taker fee + median measured spread) per pair. If Kraken's is lower by ≥ 0.2 percentage points **and** its minimums pass, switch to Kraken.
+- **Minimum check (§2.1 rule):** a venue and pair is usable only if its minimum order value is ≤ £1.00. On current documentation **Kraken GBP pairs fail** (£5 minimum). Kraken stays an option only if it lowers its minimums or a non-GBP Kraken pair passes.
+- Among the pairs that pass, compare the **all-in round-trip cost** (2 × taker fee + median measured spread). Switch to the cheaper venue if it is lower by ≥ 0.2 percentage points.
 - If neither venue passes the minimum check, stop and report the incompatibility to the user. The limits stay as specified.
 - If GBP books' 90th-percentile spread is > 0.5%, evaluate USDC pairs with an explicit GBP→USDC conversion cost.
 
@@ -186,14 +192,21 @@ Python 3.13, single process, asyncio, SQLite (WAL mode). Chosen because the core
 
 **Limits are hard ceilings**
 
-- The spec values (1% / 3% / 10% / 3% daily / 10% drawdown, leverage 0) are **compile-time constants**. Config may set **stricter** values only. A looser value fails start-up validation. Nothing changes limits at runtime.
+- The spec values (1% / 3% / 10% / 3% daily / 10% drawdown, leverage 0) are **hard-coded ceilings** in `risk/limits.py`. A test asserts they equal the spec. Config may set **stricter** values only. A looser value fails start-up validation, and nothing changes limits at runtime.
+- **Position growth:** if a winning position grows above **12.5%** of equity, a reduce-only trim brings it back to 10%, provided the trim meets the venue minimum. Otherwise it is left as it is and flagged.
 
 **Risk metric definitions**
 
 - **Equity (liquidation value)** = cash + Σ(qty × current bid × (1 − taker fee) − estimated slippage). Exit costs are included, so equity never overstates what could be realised.
 - **Daily loss** = (start-of-day equity − current equity) / start-of-day equity, **realised plus unrealised**. Trips at ≥ 3%. Start-of-day equity is snapshotted at the daily boundary.
 - **Daily boundary:** 00:00 **Europe/London** (the user's local day, which moves with BST). It is stored as a UTC timestamp for each day.
-- **Drawdown** = (peak equity − current equity) / peak equity. Peak is the highest liquidation-value equity ever recorded, starting at £50. Trips at ≥ 10%. The latch clears only through a manual `review-resume` command with a written reason, which is logged. Peak is **not** reset on resume.
+- **Daily-loss latch:** clears **only automatically** at the next daily boundary. **No command can clear it.**
+- **Drawdown** = (reference peak − current equity) / reference peak. Trips at ≥ 10%.
+  - The *reference peak* starts at £50 and rises with every new high in liquidation-value equity.
+  - The latch clears only through a manual `review-resume` command with a written reason, which is logged. That command **sets the reference peak to current equity**, otherwise the latch would trip again straight away.
+  - The **all-time peak and all-time drawdown are never reset**. They stay on the dashboard.
+  - **Hard stop:** if all-time drawdown reaches **20%**, `review-resume` is refused. Resuming then needs a deliberate code-level reset, recorded in the review log.
+- **Command authority:** `pause` and `resume` only toggle a user pause. They **cannot** clear the daily latch, the drawdown latch or the kill switch. Each of those has its own rule: automatic only, `review-resume` only, or `kill-clear` only.
 
 **Kill switch**
 
@@ -201,16 +214,17 @@ Python 3.13, single process, asyncio, SQLite (WAL mode). Chosen because the core
   - `HALT`: block all new entries and keep managing existing positions' stops and targets.
   - `FLATTEN`: also submit reduce-only market exits for every position.
 - Persisted in the DB, so it survives restart, and checked before every order.
-- Triggered from the dashboard, a CLI command or a sentinel file. Clearing it needs an explicit command and is logged.
+- Triggered from the dashboard, a CLI command or a sentinel file. It is cleared only by `kill-clear`, never by `resume`, and the clear is logged.
 - A separate live kill switch is specified at Milestone 10.
 
 **Idempotency and order lifecycle**
 
 - Every order has a deterministic `client_order_id` from its origin:
-  - entries: `(strategy, symbol, candle_close_ts, side)`
-  - stop or target exits: `(position_id, exit_reason)`
-  - kill-switch exits: `(position_id, "kill", switch_event_id)`
+  - entries: `(strategy, symbol, signal_candle_open_ts, side)`, using the bucket-open timestamp (§4.2)
+  - stop or target exits: `(position_id, exit_reason, attempt)`
+  - kill-switch exits: `(position_id, "kill", switch_event_id, attempt)`
 - A UNIQUE constraint means a replay is a no-op.
+- **Exit retries:** `attempt` increases only when the previous exit attempt reached `REJECTED` or `EXPIRED`. A partial unique index allows **at most one active exit order per position**, so retries can't duplicate sells.
 - **States:** `NEW → (PARTIALLY_FILLED)* → FILLED | CANCELLED | REJECTED | EXPIRED`. Each fill is a separate ledger row keyed by `(client_order_id, fill_seq)`, so partial fills can't double-count.
 
 **Fail closed, restart and reconciliation**
@@ -221,7 +235,7 @@ Python 3.13, single process, asyncio, SQLite (WAL mode). Chosen because the core
   1. Rebuild positions from fills.
   2. Check cash = initial capital + Σ cash flows.
   3. Check that every open position has its protective stop record.
-  4. **Replay candles missed while down** in time order, triggering any stop or target that would have hit, at the worse of the stop level and the first candle open after it was crossed.
+  4. **Replay candles missed while down** in time order, using the same stop-fill function as the backtester (§4.2).
   5. Only then allow entries.
 - If any check fails, the system stays in `HALT` and says why.
 
@@ -235,16 +249,18 @@ Python 3.13, single process, asyncio, SQLite (WAL mode). Chosen because the core
 
 - **Market buy** fills at the **ask** plus slippage. **Market sell** fills at the **bid** minus slippage. Slippage = base bps + a size-dependent term from order-book depth where available, otherwise a fixed conservative value.
 - **Limit orders** fill only when the price **trades through** the limit (touching is not enough). Fills are partial when the order is larger than a configured share of displayed depth.
-- **Stops** trigger as market orders on the next observed price. On a gap, the fill is at the gapped price, never at the stop level. The dashboard and docs state that a stop doesn't guarantee an exit price.
+- **Stops: one function used everywhere** (live paper, backtest and restart replay): `stop_fill = min(stop_price, first_observed_price_at_or_after_trigger) × (1 − slippage)`.
+  - In live paper, `first_observed_price` is the first fresh **bid** at or below the stop.
+  - In backtest and replay, it is the candle **open** if the open is already at or below the stop (a gap). Otherwise it is the stop level, with the half-spread then applied as for any sell.
+  - A stop therefore never fills better than its level. The dashboard and docs state that a stop does not guarantee an exit price.
 - Fees use the **taker** rate unless a limit order genuinely rests.
 - Orders that break exchange minimums, precision or available cash are **rejected**.
 
 **Backtests** use the same fill and risk code, plus:
 
 - **Candle timestamps** are normalised to bucket **open** time (Coinbase `start`). A candle opening at time *T* with interval Δ is usable only once its close at *T+Δ* has passed. A signal from it executes no earlier than the open of the next candle. The newest, unfinished candle is always dropped. Tests check this, including a test that fails if the signal function sees any data stamped later than its decision time.
-- **Spread:** candles carry no bid/ask, so backtests charge a half-spread on each side equal to the **90th-percentile spread measured in Milestone 2**, with a floor of 0.10% per side. Until measurements exist, they use 0.25% per side.
+- **Spread:** candles carry no bid/ask, so backtests assume a full spread *S*: buys fill at price × (1 + S/2), sells at price × (1 − S/2). S = max(measured 90th-percentile spread from Milestone 2, 0.20%). Until measurements exist, S = 0.50%.
 - **Same-candle stop and target:** if one candle's range covers both, assume the **stop hit first**.
-- **Gaps:** if a candle opens beyond the stop, fill at the open.
 
 ### 4.3 Proposed package layout (Milestone 3 onward)
 
@@ -287,7 +303,7 @@ Defined before any backtest runs. Below, OOS means out-of-sample. A strategy con
 **Process controls**
 
 - **P1:** At most **5 configurations per strategy family** may be evaluated on OOS, chosen using training and validation data only. All OOS results are reported, including failures.
-- **P2:** The OOS window is ≥ 18 months and includes at least one fall of 20% or more in the underlying asset. Each configuration is evaluated on it once.
+- **P2:** The OOS window is the most recent 30% of history (≥ 18 months), fixed in advance and **never moved**. Each configuration is evaluated on it once. If that window has no fall of 20% or more in the underlying asset, every configuration is labelled **insufficient evidence** and is not eligible. The window is not changed to find one.
 
 **Criteria**
 
@@ -297,9 +313,9 @@ Defined before any backtest runs. Below, OOS means out-of-sample. A strategy con
 4. OOS expectancy per trade > 0 after stressed costs.
 5. **Benchmark:** OOS net return > the return of buy-and-hold **scaled to the strategy's average exposure** (B&H return × average fraction of equity invested). Plain buy-and-hold is reported alongside but isn't a pass/fail test.
 6. Net profitable in at least 2 of 3 equal chronological OOS sub-windows.
-7. **Forward paper test:** ≥ 90 days on live data with ≥ 20 trades, **and**:
+7. **Forward paper test:** at least 90 days on live data **and at least 15 trades**. If 15 trades haven't happened by day 90, the test continues up to 365 days, then fails. (At the minimum OOS rate of 50 trades in 18 months, 15 trades take about 5–6 months, so lower-frequency strategies aren't ruled out.) It must also meet:
    - forward net profit factor ≥ **1.0** (absolute floor), **and**
-   - forward profit factor ≥ the 5th percentile of a bootstrap distribution of OOS profit factor. The bootstrap uses 10,000 resamples, each drawing *n_forward* trades with replacement from the OOS trade list, with seed fixed at 20261010. Resamples with no losses are dropped.
+   - forward profit factor ≥ the 5th percentile of a bootstrap distribution of OOS profit factor. The bootstrap uses 10,000 resamples, each drawing *n_forward* trades with replacement from the OOS trade list, with seed fixed at 20261010. Resamples with no losses are dropped. If more than 5% are dropped, the result is reported as unreliable and the criterion fails.
 
 Meeting this threshold makes a strategy eligible for **review**. It is not proof of future profit. Expect most or all configurations to fail. That outcome will be reported as it is.
 
