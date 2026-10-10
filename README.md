@@ -8,6 +8,7 @@ Autonomous crypto and meme-coin **paper-trading** system. It starts with £50 of
 
 | Milestone | Status |
 |---|---|
+| Launch guide | See [`docs/LAUNCH-GUIDE.md`](docs/LAUNCH-GUIDE.md) |
 | 1. Environment and documentation discovery | Report done. See [`docs/milestone-01-discovery.md`](docs/milestone-01-discovery.md) and [`docs/review-log.md`](docs/review-log.md) |
 | 2. Exchange selection (Coinbase Advanced Trade recommended) | Blocked: exchange API hosts aren't reachable from the dev environment yet |
 | 3–10 | Not started |
