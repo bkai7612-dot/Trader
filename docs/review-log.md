@@ -144,7 +144,7 @@ Agent B will verify conditions 1–3 in the Milestone 2 review. If they are not 
 
 ### Developer responses (revision 2)
 
-_Pending developer fixes._
+_Answered in "Developer responses (revision 3)" below._
 
 ### Developer responses (revision 3)
 
